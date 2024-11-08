@@ -69,6 +69,11 @@
     pip install -r requirements.txt
     ```
 
+5. 安裝 Intel GPU (XPU) 支援：
+    ```bash
+    pip install torch --index-url https://download.pytorch.org/whl/test/xpu
+    ```
+
 ## 使用方法
 
 ### Windows 使用者（建議方式）
