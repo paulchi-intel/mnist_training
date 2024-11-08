@@ -71,7 +71,7 @@
 
 5. 安裝 Intel GPU (XPU) 支援：
     ```bash
-    pip install torch --index-url https://download.pytorch.org/whl/test/xpu
+    pip3 install torch --index-url https://download.pytorch.org/whl/test/xpu
     ```
 
 ## 使用方法
