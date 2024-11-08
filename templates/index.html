@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>MNIST 訓練與推理</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <style>
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .plot {
+            width: 100%;
+            height: 400px;
+            margin-bottom: 20px;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background-color: #f0f0f0;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        .progress-bar-fill {
+            height: 100%;
+            background-color: #4CAF50;
+            width: 0%;
+            transition: width 0.3s ease-in-out;
+        }
+        .training-status {
+            margin: 20px 0;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+        }
+        .images-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            margin: 20px 0;
+        }
+        
+        .image-container {
+            text-align: center;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        
+        .image-container img {
+            width: 100px;
+            height: 100px;
+            image-rendering: pixelated;
+        }
+        
+        .correct-prediction {
+            color: green;
+        }
+        
+        .wrong-prediction {
+            color: red;
+        }
+        
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+            margin-bottom: 20px;
+        }
+        
+        #deviceSelect {
+            font-size: 16px;
+            margin-left: 20px;
+            padding: 5px 10px;
+            border-radius: 5px;
+            border: 1px solid #ddd;
+        }
+        
+        .tab {
+            overflow: hidden;
+            border: 1px solid #ccc;
+            background-color: #f1f1f1;
+            margin-bottom: 20px;
+        }
+        
+        .tab button {
+            background-color: inherit;
+            float: left;
+            border: none;
+            outline: none;
+            cursor: pointer;
+            padding: 14px 16px;
+            transition: 0.3s;
+        }
+        
+        .tab button:hover {
+            background-color: #ddd;
+        }
+        
+        .tab button.active {
+            background-color: #ccc;
+        }
+        
+        .tabcontent {
+            display: none;
+            padding: 6px 12px;
+        }
+        
+        #drawingCanvas {
+            border: 2px solid #000;
+            cursor: crosshair;
+            background-color: black;
+        }
+        
+        .drawing-container {
+            text-align: center;
+            margin: 20px 0;
+        }
+        
+        .drawing-controls {
+            margin: 10px 0;
+        }
+        
+        .prediction-result {
+            font-size: 24px;
+            margin: 20px 0;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="tab">
+            <button class="tablinks active" onclick="openTab(event, 'training')">訓練</button>
+            <button class="tablinks" onclick="openTab(event, 'inference')">推理</button>
+        </div>
+
+        <div id="training" class="tabcontent" style="display: block;">
+            <div class="header">
+                <h1>MNIST 訓練
+                    <select id="deviceSelect" style="margin-left: 20px; padding: 5px;">
+                        <option value="cpu">CPU</option>
+                    </select>
+                </h1>
+            </div>
+            
+            <button id="trainButton">訓練一個 Epoch</button>
+            
+            <div class="training-status">
+                <h3>訓練狀態</h3>
+                <div class="progress-bar">
+                    <div class="progress-bar-fill"></div>
+                </div>
+                <p>批次進度: <span id="batchProgress">0/0</span></p>
+                <p>當前批次損失: <span id="currentBatchLoss">-</span></p>
+                <p>訓練時間: <span id="trainingTime">0</span> 秒</p>
+            </div>
+
+            <div class="images-grid" id="imagesGrid">
+                <!-- 圖像將在這裡動態插入 -->
+            </div>
+
+            <div id="stats">
+                <p>當前損失: <span id="currentLoss">-</span></p>
+                <p>當前準確率: <span id="currentAccuracy">-</span>%</p>
+            </div>
+            <div id="lossPlot" class="plot"></div>
+            <div id="accuracyPlot" class="plot"></div>
+        </div>
+
+        <div id="inference" class="tabcontent">
+            <h1>MNIST 手寫數字推理</h1>
+            <div class="drawing-container">
+                <canvas id="drawingCanvas" width="280" height="280"></canvas>
+                <div class="drawing-controls">
+                    <button onclick="clearCanvas()">清除</button>
+                    <button onclick="predict()">預測</button>
+                </div>
+                <div class="prediction-result" id="predictionResult"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        $(document).ready(function() {
+            let statusCheck;
+            
+            function updateTrainingStatus() {
+                $.getJSON('/train_status', function(data) {
+                    if (data.is_training) {
+                        const progress = (data.current_batch / data.total_batches) * 100;
+                        $('.progress-bar-fill').css('width', progress + '%');
+                        $('#batchProgress').text(data.current_batch + '/' + data.total_batches);
+                        $('#currentBatchLoss').text(data.current_loss.toFixed(4));
+                        $('#trainingTime').text(data.training_time.toFixed(1));
+                        
+                        // 更新圖像網格
+                        const imagesGrid = $('#imagesGrid');
+                        imagesGrid.empty();
+                        
+                        data.images.forEach(function(imgData) {
+                            const isCorrect = imgData.prediction === imgData.target;
+                            const predictionClass = isCorrect ? 'correct-prediction' : 'wrong-prediction';
+                            
+                            const container = $('<div class="image-container">');
+                            container.append(`<img src="data:image/png;base64,${imgData.image}">`);
+                            container.append(`<p>預測: <span class="${predictionClass}">${imgData.prediction}</span></p>`);
+                            container.append(`<p>實際: ${imgData.target}</p>`);
+                            imagesGrid.append(container);
+                        });
+                    } else {
+                        clearInterval(statusCheck);
+                        $('.progress-bar-fill').css('width', '0%');
+                        $('#trainButton').prop('disabled', false);
+                    }
+                });
+            }
+
+            // 獲取可用設備列表
+            $.getJSON('/get_devices', function(data) {
+                const deviceSelect = $('#deviceSelect');
+                deviceSelect.empty();
+                data.devices.forEach(function(device) {
+                    deviceSelect.append(
+                        $('<option></option>')
+                            .val(device)
+                            .text(device.toUpperCase())
+                    );
+                });
+            });
+
+            $('#trainButton').click(function() {
+                $(this).prop('disabled', true);
+                
+                // 先清除現有的圖表
+                Plotly.purge('lossPlot');
+                Plotly.purge('accuracyPlot');
+                
+                statusCheck = setInterval(updateTrainingStatus, 100);
+
+                $.getJSON('/train_epoch', {
+                    device: $('#deviceSelect').val()
+                }, function(data) {
+                    $('#currentLoss').text(data.loss.toFixed(4));
+                    $('#currentAccuracy').text(data.accuracy.toFixed(2));
+                    
+                    // 立即創建並顯示圖表
+                    const lossPlot = JSON.parse(data.loss_plot);
+                    const accPlot = JSON.parse(data.acc_plot);
+                    
+                    Plotly.newPlot('lossPlot', lossPlot.data, lossPlot.layout, {
+                        responsive: true,
+                        displayModeBar: false
+                    });
+                    
+                    Plotly.newPlot('accuracyPlot', accPlot.data, accPlot.layout, {
+                        responsive: true,
+                        displayModeBar: false
+                    });
+                    
+                    // 重新啟用訓練按鈕
+                    $('#trainButton').prop('disabled', false);
+                }).fail(function(jqXHR, textStatus, errorThrown) {
+                    console.error('訓練請求失敗:', textStatus, errorThrown);
+                    $('#trainButton').prop('disabled', false);
+                });
+            });
+        });
+
+        function openTab(evt, tabName) {
+            var i, tabcontent, tablinks;
+            tabcontent = document.getElementsByClassName("tabcontent");
+            for (i = 0; i < tabcontent.length; i++) {
+                tabcontent[i].style.display = "none";
+            }
+            tablinks = document.getElementsByClassName("tablinks");
+            for (i = 0; i < tablinks.length; i++) {
+                tablinks[i].className = tablinks[i].className.replace(" active", "");
+            }
+            document.getElementById(tabName).style.display = "block";
+            evt.currentTarget.className += " active";
+        }
+
+        // 繪圖相關代碼
+        const canvas = document.getElementById('drawingCanvas');
+        const ctx = canvas.getContext('2d');
+        let isDrawing = false;
+        let lastX = 0;
+        let lastY = 0;
+
+        // 設置畫筆樣式
+        ctx.strokeStyle = 'white';
+        ctx.lineWidth = 15;
+        ctx.lineCap = 'round';
+
+        canvas.addEventListener('mousedown', startDrawing);
+        canvas.addEventListener('mousemove', draw);
+        canvas.addEventListener('mouseup', stopDrawing);
+        canvas.addEventListener('mouseout', stopDrawing);
+
+        function startDrawing(e) {
+            isDrawing = true;
+            [lastX, lastY] = [e.offsetX, e.offsetY];
+        }
+
+        function draw(e) {
+            if (!isDrawing) return;
+            ctx.beginPath();
+            ctx.moveTo(lastX, lastY);
+            ctx.lineTo(e.offsetX, e.offsetY);
+            ctx.stroke();
+            [lastX, lastY] = [e.offsetX, e.offsetY];
+        }
+
+        function stopDrawing() {
+            isDrawing = false;
+        }
+
+        function clearCanvas() {
+            ctx.fillStyle = 'black';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            $('#predictionResult').text('');
+        }
+
+        function predict() {
+            const imageData = canvas.toDataURL('image/png');
+            $.ajax({
+                url: '/predict',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ image_data: imageData }),
+                success: function(response) {
+                    if (response.success) {
+                        $('#predictionResult').text('預測結果: ' + response.prediction);
+                    } else {
+                        $('#predictionResult').text('預測失敗: ' + response.error);
+                    }
+                },
+                error: function() {
+                    $('#predictionResult').text('預測請求失敗');
+                }
+            });
+        }
+
+        // 初始化畫布
+        clearCanvas();
+    </script>
+</body>
+</html> 
