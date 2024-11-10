@@ -103,7 +103,7 @@
 
 ## 作者
 
-[Paul Chi]
+Paul Chi
 
 ## 致謝
 
